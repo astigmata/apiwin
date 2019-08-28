@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -22,6 +23,7 @@ type Config struct {
 
 type Results struct {
 	Filename string `json:"filename"`
+	Fullpath string `json:"fullpath"`
 	Size     int64  `json:"size"`
 }
 
@@ -31,6 +33,7 @@ var l = log.Fatalf
 var c Config
 
 func listDirectory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	params := mux.Vars(r) // to get from id in param
 	cmd := params["folder"]
 	folderToScan := fmt.Sprint(strings.ReplaceAll(cmd, "|", "\\"))
@@ -46,7 +49,8 @@ func listDirectory(w http.ResponseWriter, r *http.Request) {
 	var results []Results
 
 	err = filepath.Walk(folderToScan, func(path string, info os.FileInfo, err error) error {
-		a := Results{Filename: info.Name(), Size: info.Size()}
+		path = fmt.Sprint(strings.ReplaceAll(path, "\\", "|"))
+		a := Results{Filename: info.Name(), Fullpath: path, Size: info.Size()}
 		results = append(results, a)
 
 		return nil
@@ -64,13 +68,24 @@ func listDirectory(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func playFileWithVLC(w http.ResponseWriter, r *http.Request) {
+	//prereqs : vlc in PATH, only one instance in vlc
+
+	params := mux.Vars(r) // to get from id in param
+	myfile := params["file"]
+	myfile = fmt.Sprint(strings.ReplaceAll(myfile, "|", "\\"))
+
+	go runCommand("vlc", myfile)
+
+}
+
 func main() {
 	loadconf()
 
 	r := mux.NewRouter()
 
 	r.HandleFunc("/v1/list/{folder}", listDirectory).Methods("GET")
-
+	r.HandleFunc("/v1/play/{file}", playFileWithVLC).Methods("GET")
 	p("listening port %s...", c.APIPort)
 	port := fmt.Sprintf(":%s", c.APIPort)
 	http.ListenAndServe(port, r)
@@ -88,5 +103,13 @@ func loadconf() {
 	err = yaml.Unmarshal(yamlFile, &c)
 	if err != nil {
 		panic(err)
+	}
+}
+
+func runCommand(command string, argument string) {
+	c := exec.Command("cmd", "/C", command, argument)
+
+	if err := c.Run(); err != nil {
+		fmt.Println("Error: ", err)
 	}
 }
